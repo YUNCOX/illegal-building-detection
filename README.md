@@ -12,9 +12,9 @@ An AI-powered municipal oversight platform designed to automatically detect unau
 
 ## 🚀 Live Demo
 
-**[Link to Hugging Face Spaces Demo (TBD)](#)**
+**[▶️ Launch the Live App](https://illegal-building-detection.streamlit.app)**
 
-*This project is ready to be deployed to Hugging Face Spaces using the provided `app.py` and `requirements.txt`.*
+*Deployed on Streamlit Community Cloud — click the link above to try the AI model in your browser!*
 
 ---
 
