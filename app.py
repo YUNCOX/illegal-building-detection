@@ -3,6 +3,9 @@ import cv2
 import numpy as np
 from PIL import Image
 import time
+import torch
+import torchvision.transforms as transforms
+from model import SiameseCNN
 
 # Set page config for a premium look
 st.set_page_config(
@@ -83,7 +86,7 @@ st.markdown("---")
 
 # Sidebar
 with st.sidebar:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/1/1a/Erbil_Citadel_2014.jpg/800px-Erbil_Citadel_2014.jpg", use_container_width=True, caption="Erbil City")
+    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/1/1a/Erbil_Citadel_2014.jpg/800px-Erbil_Citadel_2014.jpg", use_container_width="always", caption="Erbil City")
     st.header("Control Panel")
     st.markdown("Upload satellite imagery to detect unauthorized construction in target sectors.")
     
@@ -106,41 +109,59 @@ with col2:
     st.subheader("Recent Image (T1)")
     img2_file = st.file_uploader("Upload latest satellite scan", type=["png", "jpg", "jpeg"], key="img2")
 
-def simulate_siamese_cnn(img1, img2, min_area_thresh):
+@st.cache_resource
+def load_model():
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = SiameseCNN().to(device)
+    try:
+        model.load_state_dict(torch.load('erbil_siamese_model.pth', map_location=device, weights_only=True))
+        model.eval()
+        return model, device
+    except FileNotFoundError:
+        st.error("Model weights 'erbil_siamese_model.pth' not found. Please train the model first.")
+        return None, device
+
+siamese_model, compute_device = load_model()
+
+def run_siamese_cnn(img1, img2, min_area_thresh):
     """
-    Simulates a Siamese CNN by computing image differences.
-    In a real scenario, this would pass through a PyTorch/TensorFlow model.
+    Runs the real trained PyTorch Siamese CNN for change detection.
     """
-    # Convert PIL to OpenCV format
-    cv_img1 = cv2.cvtColor(np.array(img1), cv2.COLOR_RGB2BGR)
-    cv_img2 = cv2.cvtColor(np.array(img2), cv2.COLOR_RGB2BGR)
+    if siamese_model is None:
+        return np.array(img2), 0, 0
+
+    # Prepare images for the model
+    transform = transforms.Compose([
+        transforms.Resize((256, 256)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+    ])
     
-    # Resize to match (just in case they are slightly different)
-    cv_img2 = cv2.resize(cv_img2, (cv_img1.shape[1], cv_img1.shape[0]))
+    # Store original sizes for drawing boxes later
+    orig_img2 = np.array(img2)
+    orig_img2_cv = cv2.cvtColor(orig_img2, cv2.COLOR_RGB2BGR)
+    orig_h, orig_w = orig_img2_cv.shape[:2]
     
-    # Convert to grayscale
-    gray1 = cv2.cvtColor(cv_img1, cv2.COLOR_BGR2GRAY)
-    gray2 = cv2.cvtColor(cv_img2, cv2.COLOR_BGR2GRAY)
+    t_img1 = transform(img1.convert('RGB')).unsqueeze(0).to(compute_device)
+    t_img2 = transform(img2.convert('RGB')).unsqueeze(0).to(compute_device)
     
-    # Apply blur to reduce noise
-    blur1 = cv2.GaussianBlur(gray1, (5, 5), 0)
-    blur2 = cv2.GaussianBlur(gray2, (5, 5), 0)
+    # Inference
+    with torch.no_grad():
+        output = siamese_model(t_img1, t_img2)
+        
+    # Process output mask
+    mask = output.squeeze().cpu().numpy()
+    # Threshold the sigmoid output
+    binary_mask = (mask > 0.5).astype(np.uint8) * 255
     
-    # Compute absolute difference
-    diff = cv2.absdiff(blur1, blur2)
-    
-    # Threshold the difference
-    _, thresh = cv2.threshold(diff, 30, 255, cv2.THRESH_BINARY)
-    
-    # Dilate to fill in holes
-    kernel = np.ones((5,5), np.uint8)
-    dilated = cv2.dilate(thresh, kernel, iterations=2)
+    # Resize mask back to original image size
+    binary_mask = cv2.resize(binary_mask, (orig_w, orig_h), interpolation=cv2.INTER_NEAREST)
     
     # Find contours
-    contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
     # Draw bounding boxes
-    output_img = cv_img2.copy()
+    output_img = orig_img2_cv.copy()
     detections = 0
     total_area = 0
     
@@ -162,9 +183,9 @@ if img1_file and img2_file:
     image2 = Image.open(img2_file)
     
     with col1:
-        st.image(image1, caption="Baseline Image", use_container_width=True)
+        st.image(image1, caption="Baseline Image", use_container_width="always")
     with col2:
-        st.image(image2, caption="Recent Image", use_container_width=True)
+        st.image(image2, caption="Recent Image", use_container_width="always")
         
     st.markdown("---")
     
@@ -173,7 +194,7 @@ if img1_file and img2_file:
             # Simulate processing time for effect
             time.sleep(2) 
             
-            result_img, detection_count, changed_area = simulate_siamese_cnn(image1, image2, min_area)
+            result_img, detection_count, changed_area = run_siamese_cnn(image1, image2, min_area)
             
             st.success("Analysis Complete!")
             
@@ -202,7 +223,7 @@ if img1_file and img2_file:
                 """, unsafe_allow_html=True)
             
             st.markdown("### Detection Results")
-            st.image(result_img, caption="Detected Violations Highlighted", use_container_width=True)
+            st.image(result_img, caption="Detected Violations Highlighted", use_container_width="always")
             
             st.warning("⚠️ **Action Required**: The detected structures do not have corresponding building permits in the municipal database. Please dispatch an inspection team.")
 else:

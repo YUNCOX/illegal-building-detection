@@ -1,0 +1,21 @@
+# Python / Virtual Environment
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Project Specific Data
+dataset/
+erbil_raw_tiles/
+*.pth
+*.pt
+*.h5
+
+# OS Files
+.DS_Store
+Thumbs.db

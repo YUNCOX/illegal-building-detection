@@ -2,3 +2,6 @@ streamlit
 opencv-python-headless
 numpy
 pillow
+torch
+torchvision
+tqdm
