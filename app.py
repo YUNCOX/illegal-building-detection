@@ -97,7 +97,7 @@ with st.sidebar:
     st.header("Control Panel")
     st.markdown("Upload satellite imagery to detect unauthorized construction in target sectors.")
     
-    confidence_threshold = st.slider("Detection Confidence Threshold", 0.0, 1.0, 0.65, 0.05)
+    confidence_threshold = st.slider("Detection Confidence Threshold", 0.0, 1.0, 0.75, 0.05)
     min_area = st.number_input("Minimum Building Area (px²)", value=500, step=100)
     
     st.markdown("---")
@@ -219,40 +219,19 @@ def run_siamese_cnn(img1, img2, min_area_thresh, conf_thresh):
                 new_group.extend(groups.pop(g_idx))
             groups.append(new_group)
     
-    # STEP 6: Draw bounding boxes, expanded by pixel-diff for full building coverage
+    # STEP 6: Draw clean bounding boxes (model boxes only, no expansion)
     output_img = orig_img2_cv.copy()
     overlay = output_img.copy()
     detections = 0
     total_area = 0
     
     for group in groups:
-        # Initial model-based merged bounding box
         gx1 = min(boxes[idx][0] for idx in group)
         gy1 = min(boxes[idx][1] for idx in group)
         gx2 = max(boxes[idx][2] for idx in group)
         gy2 = max(boxes[idx][3] for idx in group)
         
-        # Expand box using pixel-diff: look for actual changes in neighborhood
-        # Search in a 40% expanded region around the model box
-        bw, bh = gx2 - gx1, gy2 - gy1
-        pad_x, pad_y = int(bw * 0.4), int(bh * 0.4)
-        sx1 = max(0, gx1 - pad_x)
-        sy1 = max(0, gy1 - pad_y)
-        sx2 = min(orig_w, gx2 + pad_x)
-        sy2 = min(orig_h, gy2 + pad_y)
-        
-        # Find pixel-diff extent in the search region
-        region = change_mask[sy1:sy2, sx1:sx2]
-        ys, xs = np.where(region > 0)
-        if len(xs) > 100:  # Only expand if substantial change exists
-            gx1 = sx1 + int(xs.min())
-            gy1 = sy1 + int(ys.min())
-            gx2 = sx1 + int(xs.max())
-            gy2 = sy1 + int(ys.max())
-        
-        w = gx2 - gx1
-        h = gy2 - gy1
-        total_area += w * h
+        total_area += (gx2 - gx1) * (gy2 - gy1)
         
         cv2.rectangle(overlay, (gx1, gy1), (gx2, gy2), (0, 0, 255), -1)
         cv2.rectangle(output_img, (gx1, gy1), (gx2, gy2), (0, 0, 255), 3)
