@@ -144,7 +144,7 @@ def run_siamese_cnn(img1, img2, min_area_thresh, conf_thresh):
         transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
     ])
     
-    # Store original images for drawing and pixel-difference filtering
+    # Store both original images
     orig_img1 = np.array(img1)
     orig_img1_cv = cv2.cvtColor(orig_img1, cv2.COLOR_RGB2BGR)
     orig_img2 = np.array(img2)
@@ -160,119 +160,89 @@ def run_siamese_cnn(img1, img2, min_area_thresh, conf_thresh):
         
     # Process output mask
     mask = output.squeeze().cpu().numpy()
-    
-    # Threshold the sigmoid output using the user-defined confidence threshold
     binary_mask = (mask > conf_thresh).astype(np.uint8) * 255
-    
-    # Resize mask back to original image size
     binary_mask = cv2.resize(binary_mask, (orig_w, orig_h), interpolation=cv2.INTER_NEAREST)
     
     # ============================================================
-    # DEFINITIVE POST-PROCESSING PIPELINE
+    # FINAL POST-PROCESSING PIPELINE
     # ============================================================
     
-    # STEP 1: Pixel-Difference Filter (THE KEY INNOVATION)
-    # Compute actual pixel difference between the two input images.
-    # Roads look the SAME in both images → low diff → gets filtered out.
-    # New buildings are DIFFERENT → high diff → survives.
+    # STEP 1: Pixel-Difference Filter
+    # Only keep detections where the pixels actually changed between images.
+    # This automatically removes roads (same in both) while keeping new buildings.
     img1_resized = cv2.resize(orig_img1_cv, (orig_w, orig_h))
     diff = cv2.absdiff(img1_resized, orig_img2_cv)
     diff_gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
-    
-    # Threshold: only keep areas where pixels actually changed significantly
-    _, change_mask = cv2.threshold(diff_gray, 25, 255, cv2.THRESH_BINARY)
-    
-    # Dilate the change mask generously so building edges aren't clipped
-    change_kernel = np.ones((35, 35), np.uint8)
-    change_mask = cv2.dilate(change_mask, change_kernel, iterations=1)
-    
-    # AND: Only keep model detections where actual pixel change occurred
+    _, change_mask = cv2.threshold(diff_gray, 10, 255, cv2.THRESH_BINARY)
+    change_mask = cv2.dilate(change_mask, np.ones((45, 45), np.uint8), iterations=1)
     binary_mask = cv2.bitwise_and(binary_mask, change_mask)
     
-    # STEP 2: Gentle Morphological Cleanup
-    # Small opening to remove tiny noise specks (gentle enough for dense dataset)
-    kernel_open = np.ones((5, 5), np.uint8)
-    binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_OPEN, kernel_open)
+    # STEP 2: Morphological Cleanup
+    binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
+    binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, np.ones((25, 25), np.uint8))
     
-    # Moderate closing to bridge gaps within buildings
-    kernel_close = np.ones((25, 25), np.uint8)
-    binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel_close)
-    
-    # STEP 3: Find and filter contours
+    # STEP 3: Find contours and get bounding boxes
     contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
-    valid_contours = []
     boxes = []
     for c in contours:
-        area = cv2.contourArea(c)
-        if area > min_area_thresh:
+        if cv2.contourArea(c) > min_area_thresh:
             x, y, w, h = cv2.boundingRect(c)
-            valid_contours.append(c)
             boxes.append([x, y, x+w, y+h])
-        else:
-            cv2.drawContours(binary_mask, [c], -1, 0, -1)
     
-    # STEP 4: Group nearby contours as single violations
-    groups = []
+    # STEP 4: Group nearby boxes into single violations
+    groups = []  # Each group is a list of box indices
     margin = 80
     
     for i, box in enumerate(boxes):
         x1, y1, x2, y2 = box
         px1, py1, px2, py2 = x1 - margin, y1 - margin, x2 + margin, y2 + margin
         
-        matched_groups = []
+        matched = []
         for g_idx, group in enumerate(groups):
             for member_idx in group:
                 mx1, my1, mx2, my2 = boxes[member_idx]
                 if not (px2 < mx1 or px1 > mx2 or py2 < my1 or py1 > my2):
-                    matched_groups.append(g_idx)
+                    matched.append(g_idx)
                     break
         
-        if not matched_groups:
+        if not matched:
             groups.append([i])
         else:
             new_group = [i]
-            for g_idx in sorted(matched_groups, reverse=True):
+            for g_idx in sorted(matched, reverse=True):
                 new_group.extend(groups.pop(g_idx))
             groups.append(new_group)
     
-    # STEP 5: Pixel-Level Mask Overlay (clean, professional rendering)
-    smooth_mask = cv2.GaussianBlur(binary_mask, (15, 15), 0)
-    _, smooth_mask = cv2.threshold(smooth_mask, 127, 255, cv2.THRESH_BINARY)
-    
+    # STEP 5: Draw ONE clean bounding box per group
     output_img = orig_img2_cv.copy()
-    red_overlay = np.zeros_like(output_img)
-    red_overlay[:, :] = (0, 0, 255)
-    
-    mask_3ch = cv2.merge([smooth_mask, smooth_mask, smooth_mask])
-    mask_float = mask_3ch.astype(float) / 255.0
-    
-    # 35% red tint where mask is active
-    output_img = (output_img * (1 - mask_float * 0.35) + red_overlay * mask_float * 0.35).astype(np.uint8)
-    
-    # Draw red border around detected areas
-    edge_contours, _ = cv2.findContours(smooth_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    cv2.drawContours(output_img, edge_contours, -1, (0, 0, 255), 2)
-    
-    # STEP 6: Count violations and place labels
+    overlay = output_img.copy()
     detections = 0
     total_area = 0
     
     for group in groups:
-        group_area = sum(cv2.contourArea(valid_contours[idx]) for idx in group)
-        total_area += group_area
+        # Compute the merged bounding box for the entire group
+        gx1 = min(boxes[idx][0] for idx in group)
+        gy1 = min(boxes[idx][1] for idx in group)
+        gx2 = max(boxes[idx][2] for idx in group)
+        gy2 = max(boxes[idx][3] for idx in group)
         
-        topmost_y = float('inf')
-        topmost_x = 0
-        for idx in group:
-            c = valid_contours[idx]
-            pt = tuple(c[c[:, :, 1].argmin()][0])
-            if pt[1] < topmost_y:
-                topmost_y = pt[1]
-                topmost_x = pt[0]
-        cv2.putText(output_img, f'Violation {detections+1}', (max(0, topmost_x-40), max(20, topmost_y-15)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+        w = gx2 - gx1
+        h = gy2 - gy1
+        area = w * h
+        total_area += area
+        
+        # Draw filled rectangle on overlay for transparent effect
+        cv2.rectangle(overlay, (gx1, gy1), (gx2, gy2), (0, 0, 255), -1)
+        # Draw solid border on output
+        cv2.rectangle(output_img, (gx1, gy1), (gx2, gy2), (0, 0, 255), 3)
+        # Label
+        cv2.putText(output_img, f'Violation {detections+1}', (gx1, max(20, gy1-10)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
         
         detections += 1
+    
+    # Blend: 25% overlay + 75% original for semi-transparent fill
+    cv2.addWeighted(overlay, 0.25, output_img, 0.75, 0, output_img)
     
     return cv2.cvtColor(output_img, cv2.COLOR_BGR2RGB), detections, total_area
 
