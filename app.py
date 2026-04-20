@@ -80,8 +80,15 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Application Header
-st.title("🏙️ Erbil Municipal Oversight AI")
-st.markdown("*Powered by Siamese Convolutional Neural Networks (Prototype)*")
+st.markdown("""
+<h1 style='text-align: center; font-size: 3rem; font-weight: 800; background: -webkit-linear-gradient(45deg, #ef4444, #f59e0b); -webkit-background-clip: text; -webkit-text-fill-color: transparent; text-shadow: 0px 4px 20px rgba(239, 68, 68, 0.3); margin-bottom: 0px;'>
+    🚨 Illegal Building Detection
+</h1>
+<h3 style='text-align: center; color: #94a3b8 !important; margin-top: 0px; font-weight: 400;'>
+    Erbil Municipal Oversight AI
+</h3>
+""", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; font-style: italic; color: #64748b;'>Powered by Siamese Convolutional Neural Networks</p>", unsafe_allow_html=True)
 st.markdown("---")
 
 # Sidebar
