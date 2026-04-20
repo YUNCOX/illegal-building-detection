@@ -228,28 +228,31 @@ def run_siamese_cnn(img1, img2, min_area_thresh, conf_thresh):
     total_area = 0
     
     for group in groups:
-        # Combine all points from all contours in the group
-        all_points = np.vstack([valid_contours[idx] for idx in group])
+        group_contours = [valid_contours[idx] for idx in group]
         
-        # Create a convex hull to get the overall shape boundary
-        hull = cv2.convexHull(all_points)
+        # Smooth each individual contour for clean edges, then draw them all
+        smoothed = []
+        for c in group_contours:
+            epsilon = 0.02 * cv2.arcLength(c, True)
+            smoothed.append(cv2.approxPolyDP(c, epsilon, True))
         
-        # Smooth the hull with polygon approximation for clean edges
-        epsilon = 0.015 * cv2.arcLength(hull, True)
-        smooth_hull = cv2.approxPolyDP(hull, epsilon, True)
+        # Draw smoothed outlines and fills for all pieces in the group
+        cv2.drawContours(output_img, smoothed, -1, (0, 0, 255), 3)
+        cv2.drawContours(overlay, smoothed, -1, (0, 0, 255), -1)
         
-        # Draw smooth outline
-        cv2.drawContours(output_img, [smooth_hull], -1, (0, 0, 255), 3)
-        # Draw semi-transparent fill
-        cv2.drawContours(overlay, [smooth_hull], -1, (0, 0, 255), -1)
-        
-        # Calculate area
-        group_area = cv2.contourArea(smooth_hull)
+        # Calculate total area for the group
+        group_area = sum(cv2.contourArea(s) for s in smoothed)
         total_area += group_area
         
-        # Label at the topmost point
-        topmost = tuple(smooth_hull[smooth_hull[:, :, 1].argmin()][0])
-        cv2.putText(output_img, f'Violation {detections+1}', (max(0, topmost[0]-40), max(20, topmost[1]-15)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+        # Find topmost point across all contours for the label
+        topmost_y = float('inf')
+        topmost_x = 0
+        for s in smoothed:
+            pt = tuple(s[s[:, :, 1].argmin()][0])
+            if pt[1] < topmost_y:
+                topmost_y = pt[1]
+                topmost_x = pt[0]
+        cv2.putText(output_img, f'Violation {detections+1}', (max(0, topmost_x-40), max(20, topmost_y-15)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
         
         detections += 1
             
