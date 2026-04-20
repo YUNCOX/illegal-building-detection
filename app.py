@@ -179,13 +179,10 @@ def run_siamese_cnn(img1, img2, min_area_thresh, conf_thresh):
         _, change_mask = cv2.threshold(diff_gray, 25, 255, cv2.THRESH_BINARY)
         change_mask = cv2.dilate(change_mask, np.ones((25, 25), np.uint8), iterations=1)
         binary_mask = cv2.bitwise_and(binary_mask, change_mask)
-        
-        # Erode the mask to pull edges inward for tighter bounding boxes
-        binary_mask = cv2.erode(binary_mask, np.ones((15, 15), np.uint8), iterations=1)
     
     # STEP 2: Morphological Cleanup
     binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
-    binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, np.ones((25, 25), np.uint8))
+    binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, np.ones((35, 35), np.uint8))
     
     # STEP 3: Find contours and get bounding boxes
     contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
