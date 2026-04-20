@@ -244,7 +244,7 @@ This system uses a **Siamese Convolutional Neural Network** architecture designe
 #### 📊 Model & Dataset Specifications
 - **Architecture:** Custom PyTorch Siamese CNN (Encoder-Decoder)
 - **Training Data:** 7,500 High-Resolution Semi-Synthetic Erbil Image Pairs (ArcGIS)
-- **Training Regimen:** 8 Epochs (Hardware Accelerated via RTX 4070 Ti Super)
+- **Training Regimen:** 8 Epochs (CUDA-Accelerated GPU Computing)
 - **Validation Loss:** **0.0007** (Near-Perfect Convergence)
 
 #### 🎓 Developed By

@@ -16,3 +16,7 @@ erbil_raw_tiles/
 # OS Files
 .DS_Store
 Thumbs.db
+
+# Presentation Utility
+create_presentation.py
+*.pptx

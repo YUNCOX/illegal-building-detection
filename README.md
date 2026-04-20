@@ -47,7 +47,7 @@ This project was developed addressing the core evaluation criteria of the forum:
 
 1. **Clone the repository:**
    ```bash
-   git clone <your-github-repo-url>
+   git clone https://github.com/YUNCOX/illegal-building-detection.git
    cd illegal-building-detection
    ```
 
