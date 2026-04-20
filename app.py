@@ -86,7 +86,7 @@ st.markdown("---")
 
 # Sidebar
 with st.sidebar:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/1/1a/Erbil_Citadel_2014.jpg/800px-Erbil_Citadel_2014.jpg", use_container_width="always", caption="Erbil City")
+    st.image("banner.png", use_container_width="always", caption="Erbil City AI Scanning")
     st.header("Control Panel")
     st.markdown("Upload satellite imagery to detect unauthorized construction in target sectors.")
     

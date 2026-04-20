@@ -1,6 +1,6 @@
 # Illegal Building Detection (Erbil City)
 
-![Erbil Municipal AI](https://upload.wikimedia.org/wikipedia/commons/thumb/1/1a/Erbil_Citadel_2014.jpg/800px-Erbil_Citadel_2014.jpg)
+![Erbil Municipal AI](banner.png)
 
 **🎓 Institution:** Al-Farabi University  
 **👥 Team:** Abdulrahman Ahmed Turki, Mohammed Natiq Hilo, Mustafa Ahmed Najah  
