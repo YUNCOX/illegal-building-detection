@@ -167,17 +167,12 @@ def run_siamese_cnn(img1, img2, min_area_thresh, conf_thresh):
     
     # --- Computer Vision Post-Processing ---
     # 1. Morphological Opening: Remove small noise specks
-    kernel_open = np.ones((5, 5), np.uint8)
+    kernel_open = np.ones((7, 7), np.uint8)
     binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_OPEN, kernel_open)
     
-    # 2. Aggressive Morphological Closing: Bridge gaps between building segments
-    #    A 35x35 kernel ensures even wide gaps (like warehouse roof splits) get connected
-    kernel_close = np.ones((35, 35), np.uint8)
+    # 2. Morphological Closing: Bridge gaps between building segments
+    kernel_close = np.ones((45, 45), np.uint8)
     binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel_close)
-    
-    # 3. Light dilation to slightly expand detection boundaries for completeness
-    kernel_dilate = np.ones((7, 7), np.uint8)
-    binary_mask = cv2.dilate(binary_mask, kernel_dilate, iterations=1)
     
     # Find contours for counting and labeling only
     contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
