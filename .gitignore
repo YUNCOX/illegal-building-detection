@@ -12,9 +12,6 @@ venv.bak/
 # Project Specific Data
 dataset/
 erbil_raw_tiles/
-*.pth
-*.pt
-*.h5
 
 # OS Files
 .DS_Store
