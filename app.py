@@ -97,7 +97,7 @@ with st.sidebar:
     st.header("Control Panel")
     st.markdown("Upload satellite imagery to detect unauthorized construction in target sectors.")
     
-    confidence_threshold = st.slider("Detection Confidence Threshold", 0.0, 1.0, 0.50, 0.05)
+    confidence_threshold = st.slider("Detection Confidence Threshold", 0.0, 1.0, 0.65, 0.05)
     min_area = st.number_input("Minimum Building Area (px²)", value=500, step=100)
     
     st.markdown("---")
@@ -191,6 +191,9 @@ def run_siamese_cnn(img1, img2, min_area_thresh, conf_thresh):
     for c in contours:
         if cv2.contourArea(c) > min_area_thresh:
             x, y, w, h = cv2.boundingRect(c)
+            aspect = max(w, h) / (min(w, h) + 1)
+            if aspect > 5.0:  # Skip thin road-like strips
+                continue
             boxes.append([x, y, x+w, y+h])
     
     # STEP 4: Group nearby boxes into single violations
