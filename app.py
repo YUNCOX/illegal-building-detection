@@ -130,7 +130,7 @@ def load_model():
 
 siamese_model, compute_device = load_model()
 
-def run_siamese_cnn(img1, img2, min_area_thresh):
+def run_siamese_cnn(img1, img2, min_area_thresh, conf_thresh):
     """
     Runs the real trained PyTorch Siamese CNN for change detection.
     """
@@ -158,11 +158,21 @@ def run_siamese_cnn(img1, img2, min_area_thresh):
         
     # Process output mask
     mask = output.squeeze().cpu().numpy()
-    # Threshold the sigmoid output
-    binary_mask = (mask > 0.5).astype(np.uint8) * 255
+    
+    # Threshold the sigmoid output using the user-defined confidence threshold
+    binary_mask = (mask > conf_thresh).astype(np.uint8) * 255
     
     # Resize mask back to original image size
     binary_mask = cv2.resize(binary_mask, (orig_w, orig_h), interpolation=cv2.INTER_NEAREST)
+    
+    # --- Computer Vision Post-Processing ---
+    # 1. Morphological Closing: merges nearby fragmented contours (fixes the 3 boxes -> 1 box issue)
+    kernel_close = np.ones((25, 25), np.uint8)
+    binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel_close)
+    
+    # 2. Morphological Opening: removes small noise like road artifacts (fixes the 9 boxes issue)
+    kernel_open = np.ones((5, 5), np.uint8)
+    binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_OPEN, kernel_open)
     
     # Find contours
     contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -201,7 +211,7 @@ if img1_file and img2_file:
             # Simulate processing time for effect
             time.sleep(2) 
             
-            result_img, detection_count, changed_area = run_siamese_cnn(image1, image2, min_area)
+            result_img, detection_count, changed_area = run_siamese_cnn(image1, image2, min_area, confidence_threshold)
             
             st.success("Analysis Complete!")
             
