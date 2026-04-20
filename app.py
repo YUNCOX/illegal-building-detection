@@ -234,6 +234,16 @@ st.markdown("""
 ### 🧠 About this AI Project
 This system uses a **Siamese Convolutional Neural Network** architecture designed to compare two distinct temporal satellite images. By extracting deep spatial features from both images simultaneously, the network computes a distance metric to highlight structural deviations (new buildings) while ignoring seasonal changes, lighting variations, and minor foliage differences.
 
+#### 📊 Model & Dataset Specifications
+- **Architecture:** Custom PyTorch Siamese CNN (Encoder-Decoder)
+- **Training Data:** 7,500 High-Resolution Semi-Synthetic Erbil Image Pairs (ArcGIS)
+- **Training Regimen:** 8 Epochs (Hardware Accelerated via RTX 4070 Ti Super)
+- **Validation Loss:** **0.0007** (Near-Perfect Convergence)
+
+#### 🎓 Developed By
+- **University:** Al-Farabi University
+- **Team:** Abdulrahman Ahmed Turki, Mohammed Natiq Hilo, Mustafa Ahmed Najah
+
 **Ethical & Privacy Considerations:**
 - Only public and authorized municipal satellite data is processed.
 - No personally identifiable information (PII) is gathered from the imagery.

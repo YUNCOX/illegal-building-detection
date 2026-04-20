@@ -2,6 +2,10 @@
 
 ![Erbil Municipal AI](https://upload.wikimedia.org/wikipedia/commons/thumb/1/1a/Erbil_Citadel_2014.jpg/800px-Erbil_Citadel_2014.jpg)
 
+**🎓 Institution:** Al-Farabi University  
+**👥 Team:** Abdulrahman Ahmed Turki, Mohammed Natiq Hilo, Mustafa Ahmed Najah  
+**📊 Performance:** Validation Loss `0.0007` (Trained on 7,500 real-terrain image pairs over 8 epochs)
+
 An AI-powered municipal oversight platform designed to automatically detect unauthorized construction using satellite imagery. Built specifically for the **First Annual Student Forum for AI Projects** at the University of Baghdad, College of Artificial Intelligence.
 
 ---
@@ -77,5 +81,10 @@ This project was developed addressing the core evaluation criteria of the forum:
 - `README.md`: Project documentation.
 - `sample_data/`: Contains example 'Before' and 'After' satellite images for testing the demo.
 
+## 🎓 University
+**Al-Farabi University**
+
 ## 👥 Team
-- *Add your team names here*
+1. **Abdulrahman Ahmed Turki**
+2. **Mohammed Natiq Hilo**
+3. **Mustafa Ahmed Najah**
