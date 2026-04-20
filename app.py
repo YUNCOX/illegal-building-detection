@@ -179,10 +179,10 @@ def run_siamese_cnn(img1, img2, min_area_thresh, conf_thresh):
     kernel_dilate = np.ones((7, 7), np.uint8)
     binary_mask = cv2.dilate(binary_mask, kernel_dilate, iterations=1)
     
-    # Find contours
+    # Find contours for counting and labeling only
     contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
-    # Filter contours: by area and by aspect ratio (remove thin road-like strips)
+    # Filter contours by area and aspect ratio
     valid_contours = []
     boxes = []
     for c in contours:
@@ -190,13 +190,17 @@ def run_siamese_cnn(img1, img2, min_area_thresh, conf_thresh):
         if area > min_area_thresh:
             x, y, w, h = cv2.boundingRect(c)
             aspect_ratio = max(w, h) / (min(w, h) + 1)
-            # Skip extremely thin shapes (aspect ratio > 6:1) — these are roads/linear artifacts
-            if aspect_ratio > 6.0:
+            if aspect_ratio > 6.0:  # Skip thin road-like strips
+                # Erase this contour from the mask so it doesn't show in overlay
+                cv2.drawContours(binary_mask, [c], -1, 0, -1)
                 continue
             valid_contours.append(c)
             boxes.append([x, y, x+w, y+h])
-            
-    # Group contours that belong to the same building complex
+        else:
+            # Erase tiny contours from the mask
+            cv2.drawContours(binary_mask, [c], -1, 0, -1)
+    
+    # Group contours for counting as single violations
     groups = []
     margin = 50
     
@@ -219,45 +223,48 @@ def run_siamese_cnn(img1, img2, min_area_thresh, conf_thresh):
             for g_idx in sorted(matched_groups, reverse=True):
                 new_group.extend(groups.pop(g_idx))
             groups.append(new_group)
-            
-    # Draw results using smoothed contours for a professional look
-    output_img = orig_img2_cv.copy()
-    overlay = output_img.copy()
     
+    # --- Pixel-Level Mask Overlay (No polygons, no triangles) ---
+    # Smooth the mask edges with Gaussian blur for a professional look
+    smooth_mask = cv2.GaussianBlur(binary_mask, (15, 15), 0)
+    _, smooth_mask = cv2.threshold(smooth_mask, 127, 255, cv2.THRESH_BINARY)
+    
+    # Create the red overlay using the mask directly
+    output_img = orig_img2_cv.copy()
+    red_overlay = np.zeros_like(output_img)
+    red_overlay[:, :] = (0, 0, 255)  # BGR red
+    
+    # Apply the mask: where mask is white, blend red onto the image
+    mask_3ch = cv2.merge([smooth_mask, smooth_mask, smooth_mask])
+    mask_float = mask_3ch.astype(float) / 255.0
+    
+    # Blend: 30% red + 70% original where mask is active
+    output_img = (output_img * (1 - mask_float * 0.35) + red_overlay * mask_float * 0.35).astype(np.uint8)
+    
+    # Draw a clean red border around the mask edges
+    edge_contours, _ = cv2.findContours(smooth_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    cv2.drawContours(output_img, edge_contours, -1, (0, 0, 255), 2)
+    
+    # Count violations and place labels
     detections = 0
     total_area = 0
     
     for group in groups:
-        group_contours = [valid_contours[idx] for idx in group]
-        
-        # Smooth each individual contour for clean edges, then draw them all
-        smoothed = []
-        for c in group_contours:
-            epsilon = 0.02 * cv2.arcLength(c, True)
-            smoothed.append(cv2.approxPolyDP(c, epsilon, True))
-        
-        # Draw smoothed outlines and fills for all pieces in the group
-        cv2.drawContours(output_img, smoothed, -1, (0, 0, 255), 3)
-        cv2.drawContours(overlay, smoothed, -1, (0, 0, 255), -1)
-        
-        # Calculate total area for the group
-        group_area = sum(cv2.contourArea(s) for s in smoothed)
+        group_area = sum(cv2.contourArea(valid_contours[idx]) for idx in group)
         total_area += group_area
         
-        # Find topmost point across all contours for the label
+        # Find topmost point for label
         topmost_y = float('inf')
         topmost_x = 0
-        for s in smoothed:
-            pt = tuple(s[s[:, :, 1].argmin()][0])
+        for idx in group:
+            c = valid_contours[idx]
+            pt = tuple(c[c[:, :, 1].argmin()][0])
             if pt[1] < topmost_y:
                 topmost_y = pt[1]
                 topmost_x = pt[0]
         cv2.putText(output_img, f'Violation {detections+1}', (max(0, topmost_x-40), max(20, topmost_y-15)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
         
         detections += 1
-            
-    # Blend the overlay for transparent highlight effect
-    cv2.addWeighted(overlay, 0.30, output_img, 0.70, 0, output_img)
     
     return cv2.cvtColor(output_img, cv2.COLOR_BGR2RGB), detections, total_area
 
