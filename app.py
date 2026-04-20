@@ -167,32 +167,30 @@ def run_siamese_cnn(img1, img2, min_area_thresh, conf_thresh):
     
     # --- Computer Vision Post-Processing ---
     # 1. Morphological Opening (ERASER): Remove noise FIRST before it can expand. 
-    # Use a stronger kernel to wipe out the road artifacts and tiny specs.
-    kernel_open = np.ones((11, 11), np.uint8)
+    # Use a gentle kernel to wipe out tiny noise without destroying small houses.
+    kernel_open = np.ones((5, 5), np.uint8)
     binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_OPEN, kernel_open)
     
-    # 2. Morphological Closing (GLUE): Fills gaps between building panels without inflating final size
-    kernel_close = np.ones((31, 31), np.uint8)
+    # 2. Morphological Closing: Fills gaps between panels to smooth shapes.
+    kernel_close = np.ones((15, 15), np.uint8)
     binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel_close)
     
     # Find contours
     contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
-    # 1. Filter contours and get their bounding boxes
+    # 1. Filter contours by Area (Let the Streamlit slider do the filtering, NO hardcoded height hacks!)
     valid_contours = []
     boxes = []
     for c in contours:
         area = cv2.contourArea(c)
         if area > min_area_thresh:
             x, y, w, h = cv2.boundingRect(c)
-            if h > orig_h * 0.75: # Ignore road artifacts
-                continue
             valid_contours.append(c)
             boxes.append([x, y, x+w, y+h])
             
-    # 2. Group contours that are physically close to each other
+    # 2. Group contours that belong to the same building complex
     groups = [] # List of lists of contour indices
-    margin = 50 # Virtual expansion margin to group nearby pieces
+    margin = 40 # Virtual expansion margin to group nearby pieces
     
     for i, box in enumerate(boxes):
         x1, y1, x2, y2 = box
@@ -205,7 +203,7 @@ def run_siamese_cnn(img1, img2, min_area_thresh, conf_thresh):
                 mx1, my1, mx2, my2 = boxes[member_idx]
                 if not (px2 < mx1 or px1 > mx2 or py2 < my1 or py1 > my2):
                     matched_groups.append(g_idx)
-                    break # Matches this group, no need to check other members
+                    break # Matches this group
         
         if not matched_groups:
             groups.append([i])
@@ -216,7 +214,7 @@ def run_siamese_cnn(img1, img2, min_area_thresh, conf_thresh):
                 new_group.extend(groups.pop(g_idx))
             groups.append(new_group)
             
-    # 3. Draw the Convex Hull for each grouped cluster
+    # 3. Draw the exact contours for each grouped cluster (True Semantic Segmentation)
     output_img = orig_img2_cv.copy()
     overlay = output_img.copy() # For transparent fill effect
     
@@ -224,25 +222,31 @@ def run_siamese_cnn(img1, img2, min_area_thresh, conf_thresh):
     total_area = 0
     
     for group in groups:
-        # Combine all points from all contours in the cluster
-        all_points = np.vstack([valid_contours[idx] for idx in group])
+        group_contours = [valid_contours[idx] for idx in group]
         
-        # Compute the convex hull (a tight polygon wrapping the cluster)
-        hull = cv2.convexHull(all_points)
+        # Draw solid contour outlines for all pieces in the group
+        cv2.drawContours(output_img, group_contours, -1, (0, 0, 255), 3)
+        # Draw semi-transparent fills
+        cv2.drawContours(overlay, group_contours, -1, (0, 0, 255), -1)
         
-        # Draw solid contour outline (Semantic Segmentation Style)
-        cv2.drawContours(output_img, [hull], -1, (0, 0, 255), 3)
-        # Draw semi-transparent fill on the overlay
-        cv2.drawContours(overlay, [hull], -1, (0, 0, 255), -1)
+        # Calculate total area for the group
+        group_area = sum([cv2.contourArea(c) for c in group_contours])
+        total_area += group_area
         
-        # Find the topmost point of the hull for the label
-        topmost = tuple(hull[hull[:, :, 1].argmin()][0])
-        cv2.putText(output_img, f'Violation {detections+1}', (max(0, topmost[0]-40), max(20, topmost[1]-15)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+        # Find the absolute topmost point among all contours in the group for the label
+        topmost_y = float('inf')
+        topmost_x = 0
+        for c in group_contours:
+            top_pt = tuple(c[c[:, :, 1].argmin()][0])
+            if top_pt[1] < topmost_y:
+                topmost_y = top_pt[1]
+                topmost_x = top_pt[0]
+                
+        cv2.putText(output_img, f'Violation {detections+1}', (max(0, topmost_x-40), max(20, topmost_y-15)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
         
         detections += 1
-        total_area += cv2.contourArea(hull)
             
-    # Blend the overlay with the original image for a professional glass/highlight effect
+    # Blend the overlay with the original image
     cv2.addWeighted(overlay, 0.35, output_img, 0.65, 0, output_img)
     
     return cv2.cvtColor(output_img, cv2.COLOR_BGR2RGB), detections, total_area
