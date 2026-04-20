@@ -166,12 +166,18 @@ def run_siamese_cnn(img1, img2, min_area_thresh, conf_thresh):
     binary_mask = cv2.resize(binary_mask, (orig_w, orig_h), interpolation=cv2.INTER_NEAREST)
     
     # --- Computer Vision Post-Processing ---
-    # 1. Morphological Opening: Remove small noise specks
-    kernel_open = np.ones((7, 7), np.uint8)
+    # Strategy: Aggressive noise removal + small closing + smart grouping
+    # This prevents roads from merging with buildings while still counting
+    # nearby building fragments as a single violation.
+    
+    # 1. Strong Opening: Aggressively erase noise (roads, shadows, tiny specs)
+    #    BEFORE closing can connect them to buildings
+    kernel_open = np.ones((11, 11), np.uint8)
     binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_OPEN, kernel_open)
     
-    # 2. Morphological Closing: Bridge gaps between building segments
-    kernel_close = np.ones((45, 45), np.uint8)
+    # 2. Small Closing: Only bridge tiny internal gaps within a building
+    #    NOT large enough to connect a building to a nearby road
+    kernel_close = np.ones((15, 15), np.uint8)
     binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel_close)
     
     # Find contours for counting and labeling only
@@ -185,19 +191,17 @@ def run_siamese_cnn(img1, img2, min_area_thresh, conf_thresh):
         if area > min_area_thresh:
             x, y, w, h = cv2.boundingRect(c)
             aspect_ratio = max(w, h) / (min(w, h) + 1)
-            if aspect_ratio > 6.0:  # Skip thin road-like strips
-                # Erase this contour from the mask so it doesn't show in overlay
+            if aspect_ratio > 5.0:  # Skip thin road/linear artifacts
                 cv2.drawContours(binary_mask, [c], -1, 0, -1)
                 continue
             valid_contours.append(c)
             boxes.append([x, y, x+w, y+h])
         else:
-            # Erase tiny contours from the mask
             cv2.drawContours(binary_mask, [c], -1, 0, -1)
     
-    # Group contours for counting as single violations
+    # Group nearby contours as single violations (large margin to catch building fragments)
     groups = []
-    margin = 50
+    margin = 80
     
     for i, box in enumerate(boxes):
         x1, y1, x2, y2 = box
