@@ -166,13 +166,15 @@ def run_siamese_cnn(img1, img2, min_area_thresh, conf_thresh):
     binary_mask = cv2.resize(binary_mask, (orig_w, orig_h), interpolation=cv2.INTER_NEAREST)
     
     # --- Computer Vision Post-Processing ---
-    # 1. Morphological Closing: merges nearby fragmented contours (fixes the 3 boxes -> 1 box issue)
-    kernel_close = np.ones((25, 25), np.uint8)
-    binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel_close)
-    
-    # 2. Morphological Opening: removes small noise like road artifacts (fixes the 9 boxes issue)
-    kernel_open = np.ones((5, 5), np.uint8)
+    # 1. Morphological Opening (ERASER): Remove noise FIRST before it can expand. 
+    # Use a stronger kernel to wipe out the road artifacts and tiny specs.
+    kernel_open = np.ones((11, 11), np.uint8)
     binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_OPEN, kernel_open)
+    
+    # 2. Aggressive Dilation (GLUE): Expands the remaining valid pixels massively 
+    # so that all fragmented parts of the large building touch and become one single blob.
+    kernel_dilate = np.ones((51, 51), np.uint8)
+    binary_mask = cv2.dilate(binary_mask, kernel_dilate, iterations=1)
     
     # Find contours
     contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
