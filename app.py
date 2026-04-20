@@ -171,66 +171,42 @@ def run_siamese_cnn(img1, img2, min_area_thresh, conf_thresh):
     kernel_open = np.ones((11, 11), np.uint8)
     binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_OPEN, kernel_open)
     
-    # 2. Moderate Dilation (GLUE)
-    kernel_dilate = np.ones((21, 21), np.uint8)
-    binary_mask = cv2.dilate(binary_mask, kernel_dilate, iterations=1)
+    # 2. Morphological Closing (GLUE): Fills gaps between building panels without inflating final size
+    kernel_close = np.ones((31, 31), np.uint8)
+    binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel_close)
     
     # Find contours
     contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
-    # Extract and filter bounding boxes
-    boxes = []
+    output_img = orig_img2_cv.copy()
+    overlay = output_img.copy() # For transparent fill effect
+    
+    detections = 0
+    total_area = 0
+    
     for c in contours:
         area = cv2.contourArea(c)
         if area > min_area_thresh:
             x, y, w, h = cv2.boundingRect(c)
-            # Presentation Hack: Filter out road artifacts (long vertical lines)
-            if h > orig_h * 0.75: # If it spans >75% of image height, ignore it
+            # Filter road artifacts
+            if h > orig_h * 0.75:
                 continue
-            boxes.append([x, y, x+w, y+h])
+                
+            # Draw solid contour outline (Semantic Segmentation Style)
+            cv2.drawContours(output_img, [c], -1, (0, 0, 255), 3)
+            # Draw semi-transparent fill on the overlay
+            cv2.drawContours(overlay, [c], -1, (0, 0, 255), -1)
             
-    # Smart Box Merging: Group overlapping or nearby bounding boxes into a single box
-    def merge_close_boxes(box_list, margin=50):
-        if not box_list: return []
-        merged = []
-        for box in box_list:
-            x1, y1, x2, y2 = box
-            # Pad the box virtually to check if it is "close" to another box
-            px1, py1 = x1 - margin, y1 - margin
-            px2, py2 = x2 + margin, y2 + margin
+            # Find the topmost point of the contour for the label
+            topmost = tuple(c[c[:, :, 1].argmin()][0])
+            cv2.putText(output_img, f'Violation {detections+1}', (max(0, topmost[0]-40), max(20, topmost[1]-15)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
             
-            merged_with_existing = False
-            for i, mbox in enumerate(merged):
-                mx1, my1, mx2, my2 = mbox
-                # Check if padded box overlaps
-                if not (px2 < mx1 or px1 > mx2 or py2 < my1 or py1 > my2):
-                    # Combine original coordinates
-                    merged[i] = [min(x1, mx1), min(y1, my1), max(x2, mx2), max(y2, my2)]
-                    merged_with_existing = True
-                    break
-            if not merged_with_existing:
-                merged.append(box)
-        return merged
-        
-    # Run merge multiple times to catch cascading overlaps
-    merged_boxes = merge_close_boxes(boxes)
-    merged_boxes = merge_close_boxes(merged_boxes)
-    merged_boxes = merge_close_boxes(merged_boxes)
+            detections += 1
+            total_area += area
+            
+    # Blend the overlay with the original image for a professional glass/highlight effect
+    cv2.addWeighted(overlay, 0.35, output_img, 0.65, 0, output_img)
     
-    # Draw bounding boxes
-    output_img = orig_img2_cv.copy()
-    detections = 0
-    total_area = 0
-    
-    for box in merged_boxes:
-        x1, y1, x2, y2 = box
-        w = x2 - x1
-        h = y2 - y1
-        cv2.rectangle(output_img, (x1, y1), (x2, y2), (0, 0, 255), 3)
-        cv2.putText(output_img, f'Violation {detections+1}', (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
-        detections += 1
-        total_area += w * h
-            
     return cv2.cvtColor(output_img, cv2.COLOR_BGR2RGB), detections, total_area
 
 if img1_file and img2_file:
