@@ -176,9 +176,12 @@ def run_siamese_cnn(img1, img2, min_area_thresh, conf_thresh):
         img1_resized = cv2.resize(orig_img1_cv, (orig_w, orig_h))
         diff = cv2.absdiff(img1_resized, orig_img2_cv)
         diff_gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
-        _, change_mask = cv2.threshold(diff_gray, 10, 255, cv2.THRESH_BINARY)
-        change_mask = cv2.dilate(change_mask, np.ones((45, 45), np.uint8), iterations=1)
+        _, change_mask = cv2.threshold(diff_gray, 25, 255, cv2.THRESH_BINARY)
+        change_mask = cv2.dilate(change_mask, np.ones((25, 25), np.uint8), iterations=1)
         binary_mask = cv2.bitwise_and(binary_mask, change_mask)
+        
+        # Erode the mask to pull edges inward for tighter bounding boxes
+        binary_mask = cv2.erode(binary_mask, np.ones((15, 15), np.uint8), iterations=1)
     
     # STEP 2: Morphological Cleanup
     binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
