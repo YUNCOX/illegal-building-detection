@@ -144,7 +144,9 @@ def run_siamese_cnn(img1, img2, min_area_thresh, conf_thresh):
         transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
     ])
     
-    # Store original sizes for drawing boxes later
+    # Store original images for drawing and pixel-difference filtering
+    orig_img1 = np.array(img1)
+    orig_img1_cv = cv2.cvtColor(orig_img1, cv2.COLOR_RGB2BGR)
     orig_img2 = np.array(img2)
     orig_img2_cv = cv2.cvtColor(orig_img2, cv2.COLOR_RGB2BGR)
     orig_h, orig_w = orig_img2_cv.shape[:2]
@@ -165,41 +167,52 @@ def run_siamese_cnn(img1, img2, min_area_thresh, conf_thresh):
     # Resize mask back to original image size
     binary_mask = cv2.resize(binary_mask, (orig_w, orig_h), interpolation=cv2.INTER_NEAREST)
     
-    # --- Computer Vision Post-Processing ---
-    # Strategy: Aggressive noise removal + small closing + smart grouping
-    # This prevents roads from merging with buildings while still counting
-    # nearby building fragments as a single violation.
+    # ============================================================
+    # DEFINITIVE POST-PROCESSING PIPELINE
+    # ============================================================
     
-    # 1. Strong Opening: Aggressively erase noise (roads, shadows, tiny specs)
-    #    BEFORE closing can connect them to buildings
-    kernel_open = np.ones((11, 11), np.uint8)
+    # STEP 1: Pixel-Difference Filter (THE KEY INNOVATION)
+    # Compute actual pixel difference between the two input images.
+    # Roads look the SAME in both images → low diff → gets filtered out.
+    # New buildings are DIFFERENT → high diff → survives.
+    img1_resized = cv2.resize(orig_img1_cv, (orig_w, orig_h))
+    diff = cv2.absdiff(img1_resized, orig_img2_cv)
+    diff_gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
+    
+    # Threshold: only keep areas where pixels actually changed significantly
+    _, change_mask = cv2.threshold(diff_gray, 25, 255, cv2.THRESH_BINARY)
+    
+    # Dilate the change mask generously so building edges aren't clipped
+    change_kernel = np.ones((35, 35), np.uint8)
+    change_mask = cv2.dilate(change_mask, change_kernel, iterations=1)
+    
+    # AND: Only keep model detections where actual pixel change occurred
+    binary_mask = cv2.bitwise_and(binary_mask, change_mask)
+    
+    # STEP 2: Gentle Morphological Cleanup
+    # Small opening to remove tiny noise specks (gentle enough for dense dataset)
+    kernel_open = np.ones((5, 5), np.uint8)
     binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_OPEN, kernel_open)
     
-    # 2. Small Closing: Only bridge tiny internal gaps within a building
-    #    NOT large enough to connect a building to a nearby road
-    kernel_close = np.ones((15, 15), np.uint8)
+    # Moderate closing to bridge gaps within buildings
+    kernel_close = np.ones((25, 25), np.uint8)
     binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel_close)
     
-    # Find contours for counting and labeling only
+    # STEP 3: Find and filter contours
     contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
-    # Filter contours by area and aspect ratio
     valid_contours = []
     boxes = []
     for c in contours:
         area = cv2.contourArea(c)
         if area > min_area_thresh:
             x, y, w, h = cv2.boundingRect(c)
-            aspect_ratio = max(w, h) / (min(w, h) + 1)
-            if aspect_ratio > 5.0:  # Skip thin road/linear artifacts
-                cv2.drawContours(binary_mask, [c], -1, 0, -1)
-                continue
             valid_contours.append(c)
             boxes.append([x, y, x+w, y+h])
         else:
             cv2.drawContours(binary_mask, [c], -1, 0, -1)
     
-    # Group nearby contours as single violations (large margin to catch building fragments)
+    # STEP 4: Group nearby contours as single violations
     groups = []
     margin = 80
     
@@ -223,28 +236,25 @@ def run_siamese_cnn(img1, img2, min_area_thresh, conf_thresh):
                 new_group.extend(groups.pop(g_idx))
             groups.append(new_group)
     
-    # --- Pixel-Level Mask Overlay (No polygons, no triangles) ---
-    # Smooth the mask edges with Gaussian blur for a professional look
+    # STEP 5: Pixel-Level Mask Overlay (clean, professional rendering)
     smooth_mask = cv2.GaussianBlur(binary_mask, (15, 15), 0)
     _, smooth_mask = cv2.threshold(smooth_mask, 127, 255, cv2.THRESH_BINARY)
     
-    # Create the red overlay using the mask directly
     output_img = orig_img2_cv.copy()
     red_overlay = np.zeros_like(output_img)
-    red_overlay[:, :] = (0, 0, 255)  # BGR red
+    red_overlay[:, :] = (0, 0, 255)
     
-    # Apply the mask: where mask is white, blend red onto the image
     mask_3ch = cv2.merge([smooth_mask, smooth_mask, smooth_mask])
     mask_float = mask_3ch.astype(float) / 255.0
     
-    # Blend: 30% red + 70% original where mask is active
+    # 35% red tint where mask is active
     output_img = (output_img * (1 - mask_float * 0.35) + red_overlay * mask_float * 0.35).astype(np.uint8)
     
-    # Draw a clean red border around the mask edges
+    # Draw red border around detected areas
     edge_contours, _ = cv2.findContours(smooth_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     cv2.drawContours(output_img, edge_contours, -1, (0, 0, 255), 2)
     
-    # Count violations and place labels
+    # STEP 6: Count violations and place labels
     detections = 0
     total_area = 0
     
@@ -252,7 +262,6 @@ def run_siamese_cnn(img1, img2, min_area_thresh, conf_thresh):
         group_area = sum(cv2.contourArea(valid_contours[idx]) for idx in group)
         total_area += group_area
         
-        # Find topmost point for label
         topmost_y = float('inf')
         topmost_x = 0
         for idx in group:
