@@ -167,24 +167,23 @@ def run_siamese_cnn(img1, img2, min_area_thresh, conf_thresh):
     # FINAL POST-PROCESSING PIPELINE
     # ============================================================
     
-    # STEP 1: Adaptive Pixel-Difference Filter
-    # Only apply when the model detects a LOT of change (>2% of image).
-    # This filters road noise in photoreal images without killing tiny detections in dense datasets.
-    mask_coverage = np.sum(binary_mask > 0) / (orig_w * orig_h)
+    # STEP 1: Compute pixel-difference change mask (always, for box expansion later)
+    img1_resized = cv2.resize(orig_img1_cv, (orig_w, orig_h))
+    diff = cv2.absdiff(img1_resized, orig_img2_cv)
+    diff_gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
+    _, change_mask = cv2.threshold(diff_gray, 25, 255, cv2.THRESH_BINARY)
+    change_mask = cv2.dilate(change_mask, np.ones((15, 15), np.uint8), iterations=1)
     
-    if mask_coverage > 0.02:  # Only filter if mask covers >2% of image
-        img1_resized = cv2.resize(orig_img1_cv, (orig_w, orig_h))
-        diff = cv2.absdiff(img1_resized, orig_img2_cv)
-        diff_gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
-        _, change_mask = cv2.threshold(diff_gray, 25, 255, cv2.THRESH_BINARY)
-        change_mask = cv2.dilate(change_mask, np.ones((25, 25), np.uint8), iterations=1)
+    # STEP 2: Adaptive filtering — only filter model mask when it covers a lot
+    mask_coverage = np.sum(binary_mask > 0) / (orig_w * orig_h)
+    if mask_coverage > 0.02:
         binary_mask = cv2.bitwise_and(binary_mask, change_mask)
     
-    # STEP 2: Morphological Cleanup
+    # STEP 3: Morphological Cleanup
     binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
     binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, np.ones((35, 35), np.uint8))
     
-    # STEP 3: Find contours and get bounding boxes
+    # STEP 4: Find contours and get bounding boxes
     contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
     boxes = []
@@ -192,12 +191,12 @@ def run_siamese_cnn(img1, img2, min_area_thresh, conf_thresh):
         if cv2.contourArea(c) > min_area_thresh:
             x, y, w, h = cv2.boundingRect(c)
             aspect = max(w, h) / (min(w, h) + 1)
-            if aspect > 5.0:  # Skip thin road-like strips
+            if aspect > 5.0:
                 continue
             boxes.append([x, y, x+w, y+h])
     
-    # STEP 4: Group nearby boxes into single violations
-    groups = []  # Each group is a list of box indices
+    # STEP 5: Group nearby boxes into single violations
+    groups = []
     margin = 80
     
     for i, box in enumerate(boxes):
@@ -220,34 +219,47 @@ def run_siamese_cnn(img1, img2, min_area_thresh, conf_thresh):
                 new_group.extend(groups.pop(g_idx))
             groups.append(new_group)
     
-    # STEP 5: Draw ONE clean bounding box per group
+    # STEP 6: Draw bounding boxes, expanded by pixel-diff for full building coverage
     output_img = orig_img2_cv.copy()
     overlay = output_img.copy()
     detections = 0
     total_area = 0
     
     for group in groups:
-        # Compute the merged bounding box for the entire group
+        # Initial model-based merged bounding box
         gx1 = min(boxes[idx][0] for idx in group)
         gy1 = min(boxes[idx][1] for idx in group)
         gx2 = max(boxes[idx][2] for idx in group)
         gy2 = max(boxes[idx][3] for idx in group)
         
+        # Expand box using pixel-diff: look for actual changes in neighborhood
+        # Search in a 40% expanded region around the model box
+        bw, bh = gx2 - gx1, gy2 - gy1
+        pad_x, pad_y = int(bw * 0.4), int(bh * 0.4)
+        sx1 = max(0, gx1 - pad_x)
+        sy1 = max(0, gy1 - pad_y)
+        sx2 = min(orig_w, gx2 + pad_x)
+        sy2 = min(orig_h, gy2 + pad_y)
+        
+        # Find pixel-diff extent in the search region
+        region = change_mask[sy1:sy2, sx1:sx2]
+        ys, xs = np.where(region > 0)
+        if len(xs) > 100:  # Only expand if substantial change exists
+            gx1 = sx1 + int(xs.min())
+            gy1 = sy1 + int(ys.min())
+            gx2 = sx1 + int(xs.max())
+            gy2 = sy1 + int(ys.max())
+        
         w = gx2 - gx1
         h = gy2 - gy1
-        area = w * h
-        total_area += area
+        total_area += w * h
         
-        # Draw filled rectangle on overlay for transparent effect
         cv2.rectangle(overlay, (gx1, gy1), (gx2, gy2), (0, 0, 255), -1)
-        # Draw solid border on output
         cv2.rectangle(output_img, (gx1, gy1), (gx2, gy2), (0, 0, 255), 3)
-        # Label
         cv2.putText(output_img, f'Violation {detections+1}', (gx1, max(20, gy1-10)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
         
         detections += 1
     
-    # Blend: 25% overlay + 75% original for semi-transparent fill
     cv2.addWeighted(overlay, 0.25, output_img, 0.75, 0, output_img)
     
     return cv2.cvtColor(output_img, cv2.COLOR_BGR2RGB), detections, total_area
