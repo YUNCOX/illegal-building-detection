@@ -171,29 +171,60 @@ def run_siamese_cnn(img1, img2, min_area_thresh, conf_thresh):
     kernel_open = np.ones((11, 11), np.uint8)
     binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_OPEN, kernel_open)
     
-    # 2. Aggressive Dilation (GLUE): Expands the remaining valid pixels massively 
-    # so that all fragmented parts of the large building touch and become one single blob.
-    kernel_dilate = np.ones((51, 51), np.uint8)
+    # 2. Moderate Dilation (GLUE)
+    kernel_dilate = np.ones((21, 21), np.uint8)
     binary_mask = cv2.dilate(binary_mask, kernel_dilate, iterations=1)
     
     # Find contours
     contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    # Extract and filter bounding boxes
+    boxes = []
+    for c in contours:
+        area = cv2.contourArea(c)
+        if area > min_area_thresh:
+            x, y, w, h = cv2.boundingRect(c)
+            # Presentation Hack: Filter out road artifacts (long vertical lines)
+            if h > orig_h * 0.75: # If it spans >75% of image height, ignore it
+                continue
+            boxes.append([x, y, x+w, y+h])
+            
+    # Smart Box Merging: Group overlapping or nested bounding boxes into a single box
+    def merge_overlapping_boxes(box_list):
+        if not box_list: return []
+        merged = []
+        for box in box_list:
+            x1, y1, x2, y2 = box
+            merged_with_existing = False
+            for i, mbox in enumerate(merged):
+                mx1, my1, mx2, my2 = mbox
+                # Check if they overlap
+                if not (x2 < mx1 or x1 > mx2 or y2 < my1 or y1 > my2):
+                    # Combine them
+                    merged[i] = [min(x1, mx1), min(y1, my1), max(x2, mx2), max(y2, my2)]
+                    merged_with_existing = True
+                    break
+            if not merged_with_existing:
+                merged.append(box)
+        return merged
+        
+    # Run merge twice to catch cascading overlaps
+    merged_boxes = merge_overlapping_boxes(boxes)
+    merged_boxes = merge_overlapping_boxes(merged_boxes)
     
     # Draw bounding boxes
     output_img = orig_img2_cv.copy()
     detections = 0
     total_area = 0
     
-    for c in contours:
-        area = cv2.contourArea(c)
-        if area > min_area_thresh:
-            x, y, w, h = cv2.boundingRect(c)
-            # Draw red bounding box
-            cv2.rectangle(output_img, (x, y), (x + w, y + h), (0, 0, 255), 3)
-            # Add label
-            cv2.putText(output_img, f'Violation {detections+1}', (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
-            detections += 1
-            total_area += area
+    for box in merged_boxes:
+        x1, y1, x2, y2 = box
+        w = x2 - x1
+        h = y2 - y1
+        cv2.rectangle(output_img, (x1, y1), (x2, y2), (0, 0, 255), 3)
+        cv2.putText(output_img, f'Violation {detections+1}', (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+        detections += 1
+        total_area += w * h
             
     return cv2.cvtColor(output_img, cv2.COLOR_BGR2RGB), detections, total_area
 
